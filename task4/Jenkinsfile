@@ -1,0 +1,69 @@
+pipeline {
+    agent { label 'agent' }  // Make sure your agent label matches
+    environment {
+        SSH_KEY = "/home/jenkins/.ssh/dev-shrey-test.pem"
+        TARGET_EC2 = "ec2-user@10.0.1.244"  // Target EC2 to deploy app
+        ECR_REPO = "746602329362.dkr.ecr.ap-south-1.amazonaws.com/shopping-cart-app"
+        IMAGE_TAG = "latest"
+    }
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git url: 'https://github.com/Shrey0330/devops-project-tasks.git', branch: 'main'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh """
+                        cd task4
+                        docker build -t shopping-cart-app:${IMAGE_TAG} .
+                    """
+                }
+            }
+        }
+
+        stage('Authenticate ECR') {
+            steps {
+                script {
+                    sh """
+                        aws ecr get-login-password --region ap-south-1 | \
+                        docker login --username AWS --password-stdin 746602329362.dkr.ecr.ap-south-1.amazonaws.com
+                    """
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh "docker tag shopping-cart-app:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}"
+                sh "docker push ${ECR_REPO}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Deploy to EC2') {
+            steps {
+                sh """
+                    ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${TARGET_EC2} '
+                        docker pull ${ECR_REPO}:${IMAGE_TAG} &&
+                        docker stop shopping-cart || true &&
+                        docker rm shopping-cart || true &&
+                        docker run -d --name shopping-cart -p 3000:3000 ${ECR_REPO}:${IMAGE_TAG}
+                    '
+                """
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Please check logs."
+        }
+    }
+}
